@@ -1,40 +1,83 @@
-# Atenção! Este arquivo não será avaliado!!!
-#
-# O arquivo calc.py importa o conteúdo do módulo parser e fornece scripts úteis para testar o
-# analisador sintático interativamente a partir da linha de comando.
-#
-import parser
+import math
+from lark import Token, Lark, InlineTransformer
+
+grammar = Lark(
+    r"""
+?start  : assign* comp?
+?assign: NAME "=" comp
+?comp  : expr ">" expr  -> gt
+       | expr ">=" expr -> ge
+       | expr "<" expr  -> lt
+       | expr "<=" expr -> le
+       | expr "!=" expr -> ne
+       | expr "==" expr -> eq
+       | expr
+?atom  : NUMBER                        -> number
+       | NAME "(" expr ")"             -> function_call
+       | NAME "(" expr ("," expr)* ")" -> function_call
+       | NAME                          -> var
+       | "(" expr ")"
+?expr  : expr "+" term  -> add
+       | expr "-" term  -> sub
+       | term
+?term  : term "*" pow   -> mul
+       | term "/" pow   -> div
+       | pow
+?pow   : atom "^" pow   -> exp
+       | atom
+NAME   : /[-+]?\w+/
+NUMBER : /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/
+%ignore /\s+/
+%ignore /\#.*/
+"""
+)
+
+exp = ["sin", "pi"]
+
+for exp in exp:
+    tree = grammar.parse(exp)
+    print(exp)
+    print(tree.pretty())
+    print('-' * 40)
 
 
-def repl():
-    print("CALCULADORA++")
-    print("Digite comandos no prompt. O comando quit encerra a sessão.\n")
-    print('O comando "debug" mostra ou oculta as árvores sintáticas intermediárias')
+class CalcTransformer(InlineTransformer):
+    from operator import add, sub, mul, truediv as div, pow as exp, gt, ge, lt, ne, eq, le
 
-    env = parser.CalcTransformer()
-    tree = None
-    debug = False
+    def __init__(self):
+        super().__init__()
+        self.variables = {k: v for k, v in vars(math).items() if not k.startswith("_")}
+        self.variables.update(max=max, min=min, abs=abs)
+        self.env = {}
 
-    while True:
-        src = input(">>> ")
-        if src == "quit":
-            break
-        if src == "debug":
-            debug = True
-            if tree:
-                print(tree.pretty())
-            continue
+    def start(self, *args):
+        return args[-1]
 
+    def assign(self, name, value):
+        self.env[name] = value
+        return self.env[name]
+
+    def const(self, token):
+        value = self.variables[token]
+        return value
+
+    def number(self, token):
         try:
-            tree = parser.grammar.parse(src)
-        except Exception as e:
-            print(f"Erro de sintaxe: {e}")
-            continue
+            return int(token)
+        except:
+            return float(token)
 
-        if debug:
-            print(tree.pretty())
-        print(env.transform(tree))
+    def function_call(self, name, *args):
+        name = str(name)
+        fn = self.variables[name.split('-')[-1]]
+        if name[0] == '-':
+            return -fn(*args)
+        return fn(*args)
 
-
-if __name__ == "__main__":
-    repl()
+    def var(self, token):
+        if token in self.variables:
+            return self.variables[token]
+        elif token[0] == "-" and token[1:] in self.variables:
+            return -self.variables[token[1:]]
+        else:
+            return self.env[token]
